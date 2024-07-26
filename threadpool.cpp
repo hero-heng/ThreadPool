@@ -34,47 +34,6 @@ ThreadPool::~ThreadPool()
     });
 }
 
-// 给线程池提交任务 用户调用该接口，传入任务对象，生产任务
-Result ThreadPool::submitTask(const std::shared_ptr<Task>& spTask)
-{
-    /**
-     * 获取锁
-     * 线程的通信 等待任务队列有空余
-     * 如果有空余，把任务放入任务队列中
-     * 因为新放了任务，任务队列肯定不空了，在notEmpty_上进行通知
-     */
-    std::unique_lock<std::mutex> lock(taskQueMtx_);
-    // 用户提交任务，最长不能阻塞超过1s，否则判断提交任务失败，返回
-    if(!notFull_.wait_for(lock,std::chrono::seconds(1),[this](){
-        return taskQue_.size() < (size_t)taskQueMaxThreshold_;
-    })) { // 表示notFull等待1s，条件依然没有满足
-        std::cerr << "task queue is full,submit task fail." << std::endl;
-//        return task->getResult(); // 线程执行完task，task对象就被析构掉了
-        return Result(spTask, false);
-    }
-    taskQue_.push(spTask);
-    taskSize_++;
-    notEmpty_.notify_all();
-
-    // cached模式 需要根据任务数量和空闲线程的数量，判断是否需要创建新的线程
-    if(poolMode_ == PoolMode::MODE_CACHED
-        && taskSize_ > idleThreadSize_
-        && curThreadSize_ < threadSizeThreshold_)
-    {
-        std::cout<<"======create new thread....======="<<std::endl;
-
-        auto thread_ptr = std::make_unique<Thread>(std::bind(&ThreadPool::threadFunc, this, std::placeholders::_1));
-        int thread_id = thread_ptr->getId();
-        threads_.emplace(thread_id,std::move(thread_ptr));
-        threads_[thread_id]->start(); // 启动线程
-        curThreadSize_++;
-        idleThreadSize_++;
-    }
-
-    // return task->getResult();
-    return Result(spTask);
-}
-
 //定义线程函数 线程池的所有线程从任务队列里面消费任务
 void ThreadPool::threadFunc(int threadId) {
     /**
@@ -85,7 +44,7 @@ void ThreadPool::threadFunc(int threadId) {
      */
     auto lastTime = std::chrono::high_resolution_clock().now();
     for(;;) {
-        std::shared_ptr<Task> task;
+        Task task;
         {
             std::unique_lock<std::mutex> lock(taskQueMtx_);
 
@@ -153,8 +112,7 @@ void ThreadPool::threadFunc(int threadId) {
         }// 取出任务后，执行任务前就应该把锁释放掉
 
         if(task != nullptr) {
-//            task->run();
-            task->exec();
+            task();
         }
 
         idleThreadSize_++;
@@ -199,3 +157,4 @@ void ThreadPool::setThreadMaxThreshold(int threshold) {
     }
     threadSizeThreshold_ = threshold;
 }
+

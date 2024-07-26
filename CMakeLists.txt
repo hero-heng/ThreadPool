@@ -6,5 +6,4 @@ include_directories(.)
 
 add_executable(ThreadPool main.cpp
         threadpool.cpp
-        Task.cpp
         thread.cpp)
